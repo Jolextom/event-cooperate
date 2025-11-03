@@ -158,6 +158,32 @@ export async function buildAndSendTicketForAttendee(
   if (!att || !att.email)
     return { ok: false, reason: "no-email", attendeeId: att?.id };
 
+  // helpers
+  function escapeHtml(str: string) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function toTitleCase(s: string) {
+    return String(s || "")
+      .toLowerCase()
+      .split(" ")
+      .filter(Boolean)
+      .map((w) => w[0].toUpperCase() + w.slice(1))
+      .join(" ");
+  }
+
+  function getRecipientFirstName(att: any) {
+    const first =
+      att.first_name ??
+      (att.name ? String(att.name).trim().split(/\s+/)[0] : "");
+    return toTitleCase(first || "");
+  }
+
   // 1) Find existing ticket
   const existing = await findTicketByAttendee(att.id);
   if (existing && !forceResend) {
@@ -169,12 +195,15 @@ export async function buildAndSendTicketForAttendee(
     };
   }
 
-  // 2) Ticket code + QR (QR kept for PDF generation only)
+  // 2) Ticket code + QR (we produce both a data URL for PDF and a raw base64 buffer for CID)
   const ticketCode = existing?.ticket_code ?? makeTicketCode();
   const qrDataUrl = await QRCode.toDataURL(ticketCode, {
     width: 400,
     margin: 1,
-  });
+  }); // data:image/png;base64,...
+  // strip "data:image/png;base64," prefix to get pure base64
+  const qrBase64 = qrDataUrl.replace(/^data:image\/png;base64,/, "");
+  const qrBuffer = Buffer.from(qrBase64, "base64");
 
   // 3) Insert or update ticket record
   let insertedTicket = existing ?? null;
@@ -195,7 +224,7 @@ export async function buildAndSendTicketForAttendee(
       ticketCode,
       attendeeName: att.name ?? null,
       eventName: undefined,
-      qrDataUrl,
+      qrDataUrl, // keep using data URL for PDF generation
     });
   } catch (e) {
     console.error("[ticketService] PDF generation failed", e);
@@ -223,11 +252,11 @@ export async function buildAndSendTicketForAttendee(
     }
   }
 
-  // 6) Prepare banner and email HTML (no QR, no view/print button)
+  // 6) Prepare banner and email HTML with CID QR placeholder (no plain text)
   const publicUrl = process.env.PUBLIC_URL ?? "";
   const bannerUrl = `${publicUrl}/banner.jpg`;
+  const recipientFirstName = escapeHtml(getRecipientFirstName(att));
 
-  // Note: we DO NOT include a "view / print" link or embed the QR in the email.
   const html = `
     <!doctype html>
     <html>
@@ -250,30 +279,44 @@ export async function buildAndSendTicketForAttendee(
               <!-- Body -->
               <tr>
                 <td style="padding:28px 36px;color:#0b2a1a;">
-                  <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#0b2a1a;">Your ticket confirmation</h1>
-                  <p style="margin:0 0 16px;font-size:14px;color:#222;">Hi ${
-                    att.name ? escapeHtml(att.name) : "there"
+                  <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#0b2a1a;">Check-In Pass</h1>
+                  <p style="margin:0 0 16px;font-size:14px;color:#222;">Hello ${
+                    recipientFirstName || "there"
                   },</p>
 
                   <p style="margin:0 0 18px;font-size:15px;color:#333;">
-                    Thank you for registering. Your ticket has been generated and is attached to this email as a PDF.
+                    We are pleased to confirm your participation in the <strong>8th Annual Convention on Impact Investing</strong>, hosted by the Impact Investors Foundation.
                   </p>
 
                   <p style="margin:0 0 18px;font-size:15px;color:#333;">
-                    <strong>Ticket Code:</strong>
-                    <span style="display:inline-block;margin-left:8px;padding:6px 10px;background:#eef7ee;border-radius:6px;font-weight:600;color:#0b2a1a;">
-                      ${ticketCode}
-                    </span>
+                    To ensure a smooth and efficient check-in, we have provided your unique QR code below. You only need to present one version at the registration desk.
                   </p>
 
-                  <p style="margin:0 0 6px;font-size:13px;color:#555;">
-                    <em>Important:</em> the QR code is embedded inside the attached PDF — please present the printed or digital PDF at the registration desk.
+                  <p style="margin:18px 0;text-align:center;">
+                    <!-- QR displayed inline via CID -->
+                    <img src="cid:ticketqr" alt="Ticket QR Code" style="max-width:300px;width:100%;height:auto;border-radius:8px;display:block;margin:0 auto;" />
+                  </p>
+
+                  <p style="margin:8px 0 6px;font-size:13px;color:#555;">
+                    For your convenience, your check-in pass (containing the same QR code) is also attached to this email as a PDF. You can save this file or print it.
+                  </p>
+
+                  <h3 style="font-size:15px;margin:16px 0 8px;color:#0b2a1a;">Event Details:</h3>
+                  <ul style="margin:0 0 12px 18px;color:#333;font-size:14px;">
+                    <li><strong>Event:</strong> 8th Annual Convention on Impact Investing</li>
+                    <li><strong>Hosted By:</strong> Impact Investors Foundation</li>
+                    <li><strong>Date:</strong> 5th - 6th November 2025</li>
+                    <li><strong>Venue:</strong> Civic Centre, Lagos</li>
+                    <li><strong>Time:</strong> 8am</li>
+                  </ul>
+
+                  <p style="margin:12px 0 0;color:#333;font-size:14px;">
+                    If you have any questions or encounter issues viewing your QR code, please contact our team at <a href="mailto:events@swatleadershipacademy.com" style="color:#0b6b3a;text-decoration:none;">events@swatleadershipacademy.com</a>.
                   </p>
 
                   <div style="margin-top:22px;color:#444;font-size:13px;">
-                    <p style="margin:0 0 8px;">If you did not register for this event, please contact us at <a href="mailto:info@yourdomain.com" style="color:#0b6b3a;text-decoration:none;">info@yourdomain.com</a>.</p>
-                    <p style="margin:0;">We look forward to seeing you.</p>
-                    <p style="margin-top:18px;">Best regards,<br/>Event Team</p>
+                    <p style="margin:0;">We look forward to welcoming you.</p>
+                    <p style="margin-top:18px;">Best regards,<br/>The SWAT Events<br/>Registrations Management for the Impact Investors Foundation</p>
                   </div>
                 </td>
               </tr>
@@ -299,25 +342,38 @@ export async function buildAndSendTicketForAttendee(
   const emailJob = await upsertEmailJob(
     insertedTicket?.id ?? null,
     att.email,
-    `Your ticket — ${ticketCode}`,
+    `Check-In Pass: 8th Annual Convention on Impact Investing`,
     html
   );
 
-  // 8) Send email including PDF attachment if present
-  try {
-    const attachments = pdfBase64
-      ? [
-          {
-            filename: `ticket-${ticketCode}.pdf`,
-            type: "application/pdf",
-            base64: pdfBase64,
-          },
-        ]
-      : undefined;
+  // 8) Prepare attachments:
+  // - PDF as before (base64)
+  // - QR image attached inline with cid 'ticketqr' so it displays in-body
+  const attachments: any[] = [];
 
+  if (pdfBase64) {
+    attachments.push({
+      filename: `ticket-${ticketCode}.pdf`,
+      type: "application/pdf",
+      base64: pdfBase64,
+    });
+  }
+
+  // attach the QR as inline image (base64) with content id 'ticketqr'
+  // many mailers accept { filename, type, base64, cid, disposition: 'inline' }
+  attachments.push({
+    filename: `ticket-${ticketCode}-qr.png`,
+    type: "image/png",
+    base64: qrBase64,
+    cid: "ticketqr",
+    disposition: "inline",
+  });
+
+  // 9) Send email including attachments
+  try {
     const sendResult = await sendTicketEmail(
       att.email,
-      `Your ticket — ${ticketCode}`,
+      `Check-In Pass: 8th Annual Convention on Impact Investing`,
       html,
       attachments
     );
@@ -382,11 +438,11 @@ export async function buildAndSendTicketForAttendee(
 }
 
 /** small helper to avoid injection in attendee names */
-function escapeHtml(str: string) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
+// function escapeHtml(str: string) {
+//   return String(str)
+//     .replace(/&/g, "&amp;")
+//     .replace(/</g, "&lt;")
+//     .replace(/>/g, "&gt;")
+//     .replace(/"/g, "&quot;")
+//     .replace(/'/g, "&#039;");
+// }
