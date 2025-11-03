@@ -28,7 +28,7 @@ async function generateTicketPdfBase64(options: {
 
   // create PDF
   const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([300, 420]); // small ticket size (points)
+  const page = pdfDoc.addPage([320, 420]); // small ticket size (points)
 
   // embed font
   const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -42,7 +42,7 @@ async function generateTicketPdfBase64(options: {
   const { width, height } = page.getSize();
 
   // Draw header
-  const headerText = eventName ?? "Event Ticket";
+  const headerText = "8th Annual Convention on Impact Investing";
   page.drawText(headerText, {
     x: 14,
     y: height - 32,
@@ -52,14 +52,11 @@ async function generateTicketPdfBase64(options: {
   });
 
   // Draw attendee name
-  if (attendeeName) {
-    page.drawText(attendeeName, {
-      x: 14,
-      y: height - 56,
-      size: 11,
-      font: fontNormal,
-    });
-  }
+  if (attendeeName)
+    page.drawText(
+      attendeeName.replace(/\b\w/g, (c) => c.toUpperCase()),
+      { x: 14, y: height - 56, size: 11, font: fontNormal }
+    );
 
   // Draw ticket code
   page.drawText(`Code: ${ticketCode}`, {
@@ -329,9 +326,6 @@ export async function buildAndSendTicketForAttendee(
                     <img src="${qrPublicUrl}" alt="Ticket QR Code" style="max-width:300px;width:100%;height:auto;border-radius:8px;display:block;margin:0 auto;" />
                   </p>
 
-                  <p style="margin:8px 0 6px;font-size:13px;color:#555;">
-                    For your convenience, your check-in pass (containing the same QR code) is also attached to this email as a PDF. You can save this file or print it.
-                  </p>
 
                   <h3 style="font-size:15px;margin:16px 0 8px;color:#0b2a1a;">Event Details:</h3>
                   <ul style="margin:0 0 12px 18px;color:#333;font-size:14px;">
@@ -346,9 +340,14 @@ export async function buildAndSendTicketForAttendee(
                     If you have any questions or encounter issues viewing your QR code, please contact our team at <a href="mailto:events@swatleadershipacademy.com" style="color:#0b6b3a;text-decoration:none;">events@swatleadershipacademy.com</a>.
                   </p>
 
+
+                   <p style="margin:8px 0 6px;font-size:13px;color:#555;">
+                    For your convenience, your check-in pass (containing the same QR code) is also attached to this email as a PDF. You can save this file or print it.
+                  </p>
+
                   <div style="margin-top:22px;color:#444;font-size:13px;">
                     <p style="margin:0;">We look forward to welcoming you.</p>
-                    <p style="margin-top:18px;">Best regards,<br/>Swat Events<br/>Registrations Management for the Impact Investors Foundation</p>
+                    <p style="margin-top:18px;">Best regards,<br/>SWAT Events<br/>Registrations Management for the Impact Investors Foundation</p>
                   </div>
                 </td>
               </tr>
@@ -358,7 +357,7 @@ export async function buildAndSendTicketForAttendee(
                 <td style="background:#f7f9f7;padding:14px 36px;color:#6b756f;font-size:12px;">
                   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;">
                     <div>&copy; ${new Date().getFullYear()} Impact Investors Foundation</div>
-                    <div style="margin-top:6px;"><a href="https://yourdomain.com" style="color:#0b6b3a;text-decoration:none;">yourdomain.com</a></div>
+                    
                   </div>
                 </td>
               </tr>
@@ -382,7 +381,7 @@ export async function buildAndSendTicketForAttendee(
   const attachments: any[] = [];
   if (pdfBase64) {
     attachments.push({
-      filename: `ticket-${ticketCode}.pdf`,
+      filename: `${recipientFirstName}-${ticketCode}.pdf`,
       type: "application/pdf",
       base64: pdfBase64,
     });
