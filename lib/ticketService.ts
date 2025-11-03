@@ -91,6 +91,33 @@ async function generateTicketPdfBase64(options: {
   return base64;
 }
 
+export async function uploadTicketQRCode(ticketId: string) {
+  // 1️⃣ Generate QR as base64
+  const qrDataUrl = await QRCode.toDataURL(ticketId);
+
+  // 2️⃣ Extract and convert to buffer
+  const base64Data = qrDataUrl.split(",")[1];
+  const buffer = Buffer.from(base64Data, "base64");
+
+  // 3️⃣ Upload to Supabase Storage (new bucket)
+  const { error: uploadError } = await supabaseAdmin.storage
+    .from("event-assets") // 👈 your new bucket name
+    .upload(`qrcodes/${ticketId}.png`, buffer, {
+      contentType: "image/png",
+      upsert: true, // replace if already exists
+    });
+
+  if (uploadError) throw new Error(uploadError.message);
+
+  const { data } = await supabaseAdmin.storage
+    .from("event-assets")
+    .createSignedUrl(`qrcodes/${ticketId}.png`, 60 * 60 * 24 * 365 * 10);
+
+  console.log("Signed URL data:", data);
+
+  return data?.signedUrl;
+}
+
 export async function findTicketByAttendee(attendeeId: string) {
   const { data, error } = await supabaseAdmin
     .from("tickets")
@@ -195,13 +222,12 @@ export async function buildAndSendTicketForAttendee(
     };
   }
 
-  // 2) Ticket code + QR (we produce both a data URL for PDF and a raw base64 buffer for CID)
+  // 2) Ticket code + QR (data URL for PDF)
   const ticketCode = existing?.ticket_code ?? makeTicketCode();
   const qrDataUrl = await QRCode.toDataURL(ticketCode, {
     width: 400,
     margin: 1,
   }); // data:image/png;base64,...
-  // strip "data:image/png;base64," prefix to get pure base64
   const qrBase64 = qrDataUrl.replace(/^data:image\/png;base64,/, "");
   const qrBuffer = Buffer.from(qrBase64, "base64");
 
@@ -224,7 +250,7 @@ export async function buildAndSendTicketForAttendee(
       ticketCode,
       attendeeName: att.name ?? null,
       eventName: undefined,
-      qrDataUrl, // keep using data URL for PDF generation
+      qrDataUrl, // used inside PDF
     });
   } catch (e) {
     console.error("[ticketService] PDF generation failed", e);
@@ -252,7 +278,14 @@ export async function buildAndSendTicketForAttendee(
     }
   }
 
-  // 6) Prepare banner and email HTML with CID QR placeholder (no plain text)
+  // 6) Upload QR to Supabase Storage bucket 'ticket-qrcodes' and get public URL
+  // Make sure you create the 'ticket-qrcodes' bucket and set it to public (or change to signed url logic)
+
+  const qrPublicUrl = await uploadTicketQRCode(ticketCode);
+
+  console.log("[ticketService] QR public URL:", qrPublicUrl);
+
+  // 7) Prepare banner and email HTML (use qrPublicUrl in the correct spot)
   const publicUrl = process.env.PUBLIC_URL ?? "";
   const bannerUrl = `${publicUrl}/banner.jpg`;
   const recipientFirstName = escapeHtml(getRecipientFirstName(att));
@@ -279,7 +312,6 @@ export async function buildAndSendTicketForAttendee(
               <!-- Body -->
               <tr>
                 <td style="padding:28px 36px;color:#0b2a1a;">
-                  <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#0b2a1a;">Check-In Pass</h1>
                   <p style="margin:0 0 16px;font-size:14px;color:#222;">Hello ${
                     recipientFirstName || "there"
                   },</p>
@@ -293,8 +325,8 @@ export async function buildAndSendTicketForAttendee(
                   </p>
 
                   <p style="margin:18px 0;text-align:center;">
-                    <!-- QR displayed inline via CID -->
-                    <img src="cid:ticketqr" alt="Ticket QR Code" style="max-width:300px;width:100%;height:auto;border-radius:8px;display:block;margin:0 auto;" />
+                    <!-- QR displayed inline via public URL -->
+                    <img src="${qrPublicUrl}" alt="Ticket QR Code" style="max-width:300px;width:100%;height:auto;border-radius:8px;display:block;margin:0 auto;" />
                   </p>
 
                   <p style="margin:8px 0 6px;font-size:13px;color:#555;">
@@ -316,7 +348,7 @@ export async function buildAndSendTicketForAttendee(
 
                   <div style="margin-top:22px;color:#444;font-size:13px;">
                     <p style="margin:0;">We look forward to welcoming you.</p>
-                    <p style="margin-top:18px;">Best regards,<br/>The SWAT Events<br/>Registrations Management for the Impact Investors Foundation</p>
+                    <p style="margin-top:18px;">Best regards,<br/>Swat Events<br/>Registrations Management for the Impact Investors Foundation</p>
                   </div>
                 </td>
               </tr>
@@ -338,7 +370,7 @@ export async function buildAndSendTicketForAttendee(
     </html>
   `;
 
-  // 7) Create email job record (HTML-only)
+  // 8) Create email job record (HTML-only)
   const emailJob = await upsertEmailJob(
     insertedTicket?.id ?? null,
     att.email,
@@ -346,11 +378,8 @@ export async function buildAndSendTicketForAttendee(
     html
   );
 
-  // 8) Prepare attachments:
-  // - PDF as before (base64)
-  // - QR image attached inline with cid 'ticketqr' so it displays in-body
+  // 9) Prepare attachments: only PDF (no inline QR attachment)
   const attachments: any[] = [];
-
   if (pdfBase64) {
     attachments.push({
       filename: `ticket-${ticketCode}.pdf`,
@@ -359,17 +388,7 @@ export async function buildAndSendTicketForAttendee(
     });
   }
 
-  // attach the QR as inline image (base64) with content id 'ticketqr'
-  // many mailers accept { filename, type, base64, cid, disposition: 'inline' }
-  attachments.push({
-    filename: `ticket-${ticketCode}-qr.png`,
-    type: "image/png",
-    base64: qrBase64,
-    cid: "ticketqr",
-    disposition: "inline",
-  });
-
-  // 9) Send email including attachments
+  // 10) Send email including PDF attachment
   try {
     const sendResult = await sendTicketEmail(
       att.email,
