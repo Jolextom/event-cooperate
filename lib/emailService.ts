@@ -36,7 +36,7 @@ export async function sendTicketEmail(
     })) ?? [];
 
   const payload: any = {
-    from: "SWAT Events <tickets@jolextom.com>",
+    from: "SWAT Events <events@swatleadershipacademy.com>",
     to,
     subject,
     html,

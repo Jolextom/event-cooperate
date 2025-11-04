@@ -9,99 +9,187 @@ function makeTicketCode(): string {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
-// helper: convert dataURL to buffer
+/** Convert a PNG (data:) dataURL to Buffer */
 function dataUrlToBuffer(dataUrl: string) {
   const matches = dataUrl.match(/^data:(.+);base64,(.+)$/);
-  if (!matches) throw new Error("Invalid data url");
-  const base64 = matches[2];
-  return Buffer.from(base64, "base64");
+  if (!matches) throw new Error("Invalid data URL");
+  return Buffer.from(matches[2], "base64");
 }
 
-// generate a simple PDF (A6-ish width) with QR image and text; returns base64 string
-async function generateTicketPdfBase64(options: {
+/** mm -> PDF points (1 point = 1/72 inch). 1 inch = 25.4 mm. */
+const pointsPerMm = 72 / 25.4;
+
+type GenerateOptions = {
   ticketCode: string;
   attendeeName?: string | null;
   eventName?: string | null;
   qrDataUrl: string;
-}) {
-  const { ticketCode, attendeeName, eventName, qrDataUrl } = options;
+  paperWidthMm?: number;
+  paperHeightMm?: number;
+  marginMm?: number;
+  printerDpi?: number;
+};
 
-  // create PDF
+// Generate PDF for EMAIL attachment (with name + role/company)
+export async function generateTicketPdfBase64(options: GenerateOptions) {
+  const {
+    attendeeName,
+    eventName,
+    qrDataUrl,
+    paperWidthMm = 60,
+    paperHeightMm = 40,
+    marginMm = 3,
+  } = options;
+
+  const pointsPerMm = 2.83465;
+  const pageWidth = paperWidthMm * pointsPerMm;
+  const pageHeight = paperHeightMm * pointsPerMm;
+
   const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([320, 420]); // small ticket size (points)
+  const page = pdfDoc.addPage([pageWidth, pageHeight]);
 
-  // embed font
-  const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const fontNormal = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-  // embed PNG image (from data URL)
+  const margin = marginMm * pointsPerMm;
+  const contentWidth = pageWidth - margin * 2;
+  const contentLeft = margin;
+  const contentTop = pageHeight - margin;
+
   const pngBytes = dataUrlToBuffer(qrDataUrl);
   const pngImage = await pdfDoc.embedPng(pngBytes);
 
-  // layout
-  const { width, height } = page.getSize();
+  const qrSize = Math.min(contentWidth * 0.35, pageHeight * 0.7);
+  const leftColumnX = contentLeft;
+  const leftColumnWidth = contentWidth - qrSize - 4 * pointsPerMm;
+  const rightColumnX = pageWidth - margin - qrSize;
 
-  // Draw header
-  const headerText = "8th Annual Convention on Impact Investing";
-  page.drawText(headerText, {
-    x: 14,
-    y: height - 32,
-    size: 14,
-    font,
-    color: rgb(0, 0, 0),
-  });
+  let currentY = contentTop;
 
-  // Draw attendee name
-  if (attendeeName)
-    page.drawText(
-      attendeeName.replace(/\b\w/g, (c) => c.toUpperCase()),
-      { x: 14, y: height - 56, size: 11, font: fontNormal }
-    );
+  // Full Name - LARGER and title case
+  if (attendeeName) {
+    const formattedName = attendeeName
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(" ");
 
-  // Draw ticket code
-  page.drawText(`Code: ${ticketCode}`, {
-    x: 14,
-    y: height - 78,
-    size: 11,
-    font: fontNormal,
-  });
+    page.drawText(formattedName, {
+      x: leftColumnX,
+      y: currentY,
+      size: 11,
+      font: fontBold,
+      color: rgb(0, 0, 0),
+      maxWidth: leftColumnWidth,
+    });
+    currentY -= 14;
+  }
 
-  // Draw QR image on the right
-  const qrDims = 160;
+  // Role/Company - smaller below name
+  if (eventName) {
+    page.drawText(eventName, {
+      x: leftColumnX,
+      y: currentY,
+      size: 8,
+      font: fontNormal,
+      color: rgb(0.2, 0.2, 0.2),
+      maxWidth: leftColumnWidth,
+    });
+  }
+
+  // Draw QR image on the right, vertically centered
+  const qrY = (pageHeight - qrSize) / 2;
   page.drawImage(pngImage, {
-    x: width - qrDims - 14,
-    y: height - qrDims - 40,
-    width: qrDims,
-    height: qrDims,
+    x: rightColumnX,
+    y: qrY,
+    width: qrSize,
+    height: qrSize,
   });
 
-  // small note
-  page.drawText("Show this QR at the entrance", {
-    x: 14,
-    y: 28,
-    size: 9,
-    font: fontNormal,
+  // Optional: thin border around QR
+  page.drawRectangle({
+    x: rightColumnX - 1,
+    y: qrY - 1,
+    width: qrSize + 2,
+    height: qrSize + 2,
+    borderWidth: 0.3,
+    color: rgb(1, 1, 1),
+    borderColor: rgb(0.7, 0.7, 0.7),
   });
 
   const pdfBytes = await pdfDoc.save();
-  const base64 = Buffer.from(pdfBytes).toString("base64");
-  return base64;
+  return Buffer.from(pdfBytes).toString("base64");
+}
+
+// Generate PDF for PRINTING (minimal badge - centered QR + name)
+export async function generatePrintBadgePdfBase64(options: {
+  ticketCode: string;
+  attendeeName?: string | null;
+  qrDataUrl: string;
+}) {
+  const { attendeeName, qrDataUrl } = options;
+
+  const paperWidthMm = 70;
+  const paperHeightMm = 50;
+  const pointsPerMm = 2.83465;
+
+  const pageWidth = paperWidthMm * pointsPerMm;
+  const pageHeight = paperHeightMm * pointsPerMm;
+
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([pageWidth, pageHeight]);
+
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  const margin = 3 * pointsPerMm;
+  const pngBytes = dataUrlToBuffer(qrDataUrl);
+  const pngImage = await pdfDoc.embedPng(pngBytes);
+
+  // For print badge: BIGGER QR
+  const qrSize = Math.min(pageWidth * 0.5, pageHeight * 0.75);
+
+  // Center the QR horizontally and position it in upper half
+  const qrX = (pageWidth - qrSize) / 2;
+  const qrY = (pageHeight - qrSize) / 2 + 5 * pointsPerMm;
+
+  page.drawImage(pngImage, {
+    x: qrX,
+    y: qrY,
+    width: qrSize,
+    height: qrSize,
+  });
+
+  // Name at bottom (if provided) - centered
+  if (attendeeName) {
+    const formattedName = attendeeName
+      .split(" ")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(" ");
+
+    const nameSize = 9;
+    const nameWidth = fontBold.widthOfTextAtSize(formattedName, nameSize);
+
+    page.drawText(formattedName, {
+      x: (pageWidth - nameWidth) / 2,
+      y: margin + 3,
+      size: nameSize,
+      font: fontBold,
+    });
+  }
+
+  const pdfBytes = await pdfDoc.save();
+  return Buffer.from(pdfBytes).toString("base64");
 }
 
 export async function uploadTicketQRCode(ticketId: string) {
-  // 1️⃣ Generate QR as base64
   const qrDataUrl = await QRCode.toDataURL(ticketId);
-
-  // 2️⃣ Extract and convert to buffer
   const base64Data = qrDataUrl.split(",")[1];
   const buffer = Buffer.from(base64Data, "base64");
 
-  // 3️⃣ Upload to Supabase Storage (new bucket)
   const { error: uploadError } = await supabaseAdmin.storage
-    .from("event-assets") // 👈 your new bucket name
+    .from("event-assets")
     .upload(`qrcodes/${ticketId}.png`, buffer, {
       contentType: "image/png",
-      upsert: true, // replace if already exists
+      upsert: true,
     });
 
   if (uploadError) throw new Error(uploadError.message);
@@ -111,7 +199,6 @@ export async function uploadTicketQRCode(ticketId: string) {
     .createSignedUrl(`qrcodes/${ticketId}.png`, 60 * 60 * 24 * 365 * 10);
 
   console.log("Signed URL data:", data);
-
   return data?.signedUrl;
 }
 
@@ -182,7 +269,6 @@ export async function buildAndSendTicketForAttendee(
   if (!att || !att.email)
     return { ok: false, reason: "no-email", attendeeId: att?.id };
 
-  // helpers
   function escapeHtml(str: string) {
     return String(str)
       .replace(/&/g, "&amp;")
@@ -224,7 +310,7 @@ export async function buildAndSendTicketForAttendee(
   const qrDataUrl = await QRCode.toDataURL(ticketCode, {
     width: 400,
     margin: 1,
-  }); // data:image/png;base64,...
+  });
   const qrBase64 = qrDataUrl.replace(/^data:image\/png;base64,/, "");
   const qrBuffer = Buffer.from(qrBase64, "base64");
 
@@ -240,49 +326,60 @@ export async function buildAndSendTicketForAttendee(
       .eq("id", existing.id);
   }
 
-  // 4) Generate PDF (base64)
-  let pdfBase64: string | null = null;
+  // 4) Generate PRINT PDF (minimal badge for printing)
+  let printPdfBase64: string | null = null;
   try {
-    pdfBase64 = await generateTicketPdfBase64({
+    printPdfBase64 = await generatePrintBadgePdfBase64({
       ticketCode,
       attendeeName: att.name ?? null,
-      eventName: undefined,
-      qrDataUrl, // used inside PDF
+      qrDataUrl,
     });
+    console.log("[ticketService] Print badge PDF generated successfully");
   } catch (e) {
-    console.error("[ticketService] PDF generation failed", e);
-    pdfBase64 = null;
+    console.error("[ticketService] Print PDF generation failed", e);
+    printPdfBase64 = null;
   }
 
-  // 5) Upload PDF & enqueue print job (best-effort; do not block email)
-  if (pdfBase64) {
+  // 5) Upload PRINT PDF & enqueue print job (this is what gets stored)
+  if (printPdfBase64) {
     try {
       const evId = att.event_id ?? process.env.EVENT_ID ?? "unknown-event";
       const printJob = await uploadPdfAndEnqueuePrint(
         evId,
         ticketCode,
-        pdfBase64,
+        printPdfBase64,
         insertedTicket?.id ?? null,
         "auto-email"
       );
-      console.log("[ticketService] enqueued print job", printJob?.id ?? null);
+      console.log("[ticketService] Enqueued print job:", printJob?.id ?? null);
     } catch (uplErr) {
       console.warn(
-        "[ticketService] upload/enqueue print failed (continuing) ",
+        "[ticketService] Upload/enqueue print failed (continuing):",
         String(uplErr)
       );
-      // continue — email will still be sent
     }
   }
 
-  // 6) Upload QR to Supabase Storage bucket 'ticket-qrcodes' and get public URL
-  // Make sure you create the 'ticket-qrcodes' bucket and set it to public (or change to signed url logic)
+  // 6) Generate EMAIL PDF (with name + role/company - NOT stored, just for attachment)
+  let emailPdfBase64: string | null = null;
+  try {
+    emailPdfBase64 = await generateTicketPdfBase64({
+      ticketCode,
+      attendeeName: att.name ?? null,
+      eventName: att.company ?? att.title ?? att.role ?? "Attendee",
+      qrDataUrl,
+    });
+    console.log("[ticketService] Email PDF generated successfully");
+  } catch (e) {
+    console.error("[ticketService] Email PDF generation failed", e);
+    emailPdfBase64 = null;
+  }
 
+  // 7) Upload QR to Supabase Storage and get public URL
   const qrPublicUrl = await uploadTicketQRCode(ticketCode);
-
   console.log("[ticketService] QR public URL:", qrPublicUrl);
 
-  // 7) Prepare banner and email HTML (use qrPublicUrl in the correct spot)
+  // 8) Prepare email HTML
   const publicUrl = process.env.PUBLIC_URL ?? "";
   const bannerUrl = `${publicUrl}/banner.jpg`;
   const recipientFirstName = escapeHtml(getRecipientFirstName(att));
@@ -322,10 +419,8 @@ export async function buildAndSendTicketForAttendee(
                   </p>
 
                   <p style="margin:18px 0;text-align:center;">
-                    <!-- QR displayed inline via public URL -->
                     <img src="${qrPublicUrl}" alt="Ticket QR Code" style="max-width:300px;width:100%;height:auto;border-radius:8px;display:block;margin:0 auto;" />
                   </p>
-
 
                   <h3 style="font-size:15px;margin:16px 0 8px;color:#0b2a1a;">Event Details:</h3>
                   <ul style="margin:0 0 12px 18px;color:#333;font-size:14px;">
@@ -340,8 +435,7 @@ export async function buildAndSendTicketForAttendee(
                     If you have any questions or encounter issues viewing your QR code, please contact our team at <a href="mailto:events@swatleadershipacademy.com" style="color:#0b6b3a;text-decoration:none;">events@swatleadershipacademy.com</a>.
                   </p>
 
-
-                   <p style="margin:8px 0 6px;font-size:13px;color:#555;">
+                  <p style="margin:8px 0 6px;font-size:13px;color:#555;">
                     For your convenience, your check-in pass (containing the same QR code) is also attached to this email as a PDF. You can save this file or print it.
                   </p>
 
@@ -357,7 +451,6 @@ export async function buildAndSendTicketForAttendee(
                 <td style="background:#f7f9f7;padding:14px 36px;color:#6b756f;font-size:12px;">
                   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;">
                     <div>&copy; ${new Date().getFullYear()} Impact Investors Foundation</div>
-                    
                   </div>
                 </td>
               </tr>
@@ -369,7 +462,7 @@ export async function buildAndSendTicketForAttendee(
     </html>
   `;
 
-  // 8) Create email job record (HTML-only)
+  // 9) Create email job record
   const emailJob = await upsertEmailJob(
     insertedTicket?.id ?? null,
     att.email,
@@ -377,17 +470,17 @@ export async function buildAndSendTicketForAttendee(
     html
   );
 
-  // 9) Prepare attachments: only PDF (no inline QR attachment)
+  // 10) Prepare attachments: EMAIL PDF only (not stored anywhere)
   const attachments: any[] = [];
-  if (pdfBase64) {
+  if (emailPdfBase64) {
     attachments.push({
       filename: `${recipientFirstName}-${ticketCode}.pdf`,
       type: "application/pdf",
-      base64: pdfBase64,
+      base64: emailPdfBase64,
     });
   }
 
-  // 10) Send email including PDF attachment
+  // 11) Send email including PDF attachment
   try {
     const sendResult = await sendTicketEmail(
       att.email,
@@ -454,13 +547,3 @@ export async function buildAndSendTicketForAttendee(
     };
   }
 }
-
-/** small helper to avoid injection in attendee names */
-// function escapeHtml(str: string) {
-//   return String(str)
-//     .replace(/&/g, "&amp;")
-//     .replace(/</g, "&lt;")
-//     .replace(/>/g, "&gt;")
-//     .replace(/"/g, "&quot;")
-//     .replace(/'/g, "&#039;");
-// }
