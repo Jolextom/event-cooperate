@@ -1014,7 +1014,7 @@ function ScanContent() {
                                     <div className="mt-1 flex items-center justify-between gap-2 p-3 bg-slate-50 rounded-lg">
                                         <span className="text-sm text-slate-900">{selectedAttendee.title}</span>
                                         <button
-                                            onClick={() => copyToClipboard(selectedAttendee.title, 'title')}
+                                            onClick={() => copyToClipboard(selectedAttendee.title || '', 'title')}
                                             className="p-1 hover:bg-slate-200 rounded transition-colors"
                                         >
                                             {copiedField === 'title' ? (
@@ -1032,7 +1032,7 @@ function ScanContent() {
                                     <div className="mt-1 flex items-center justify-between gap-2 p-3 bg-slate-50 rounded-lg">
                                         <span className="text-sm text-slate-900">{selectedAttendee.company}</span>
                                         <button
-                                            onClick={() => copyToClipboard(selectedAttendee.company, 'company')}
+                                            onClick={() => copyToClipboard(selectedAttendee.company || "", 'company')}
                                             className="p-1 hover:bg-slate-200 rounded transition-colors"
                                         >
                                             {copiedField === 'company' ? (
