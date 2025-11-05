@@ -10,9 +10,11 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.78.0",
+    "@yudiel/react-qr-scanner": "^2.4.1",
     "dotenv": "^17.2.3",
     "escpos": "^3.0.0-alpha.6",
     "escpos-usb": "^3.0.0-alpha.4",
+    "lucide-react": "^0.552.0",
     "next": "16.0.1",
     "node-fetch": "^3.3.2",
     "node-thermal-printer": "^4.5.0",
