@@ -7,6 +7,8 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+const DEFAULT_EVENT_ID = "6a9cb25b-af48-4ad3-84ca-0d050c848dee";
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -27,6 +29,7 @@ export async function POST(request: NextRequest) {
     const { data: attendee, error: attendeeError } = await supabase
       .from("attendees")
       .insert({
+        event_id: DEFAULT_EVENT_ID,
         name,
         title: title || null,
         company: company || null,
@@ -53,8 +56,10 @@ export async function POST(request: NextRequest) {
 
     // Insert new ticket
     const { error: ticketError } = await supabase.from("tickets").insert({
-      attendee_id: attendee.id, // Assuming tickets has attendee_id FK
+      event_id: DEFAULT_EVENT_ID,
+      attendee_id: attendee.id,
       ticket_code: ticketCode,
+      qr_payload: ticketCode, // Assuming qr_payload is the same as ticket_code; adjust if it's a URL or different
       meta: { ticket_type: "Walk-in" },
       checked_in_at: now,
     });
