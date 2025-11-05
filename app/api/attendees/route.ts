@@ -59,7 +59,10 @@ export async function GET(request: NextRequest) {
                     name,
                     email,
                     phone,
-                    meta
+                    meta,
+                    status,
+                    title,
+                    company
                 )
             `
       )
@@ -99,6 +102,9 @@ export async function GET(request: NextRequest) {
           name: attendee.name || "Unknown",
           email: attendee.email || "N/A",
           phone: attendee.phone || null,
+          status: attendee.status || null,
+          title: attendee.title || null,
+          company: attendee.company || null,
           ticket_code: checkIn.ticket_code,
           checked_in_at: checkIn.created_at,
           ticket_type: ticketType,

@@ -3,7 +3,6 @@ import QRCode from "qrcode";
 import { supabaseAdmin } from "./supabaseAdmin";
 import { sendTicketEmail } from "./emailService";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { uploadPdfAndEnqueuePrint } from "./printService";
 
 function makeTicketCode(): string {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -16,9 +15,6 @@ function dataUrlToBuffer(dataUrl: string) {
   return Buffer.from(matches[2], "base64");
 }
 
-/** mm -> PDF points (1 point = 1/72 inch). 1 inch = 25.4 mm. */
-const pointsPerMm = 72 / 25.4;
-
 type GenerateOptions = {
   ticketCode: string;
   attendeeName?: string | null;
@@ -27,7 +23,6 @@ type GenerateOptions = {
   paperWidthMm?: number;
   paperHeightMm?: number;
   marginMm?: number;
-  printerDpi?: number;
 };
 
 // Generate PDF for EMAIL attachment (with name + role/company)
@@ -120,66 +115,6 @@ export async function generateTicketPdfBase64(options: GenerateOptions) {
   return Buffer.from(pdfBytes).toString("base64");
 }
 
-// Generate PDF for PRINTING (minimal badge - centered QR + name)
-export async function generatePrintBadgePdfBase64(options: {
-  ticketCode: string;
-  attendeeName?: string | null;
-  qrDataUrl: string;
-}) {
-  const { attendeeName, qrDataUrl } = options;
-
-  const paperWidthMm = 70;
-  const paperHeightMm = 50;
-  const pointsPerMm = 2.83465;
-
-  const pageWidth = paperWidthMm * pointsPerMm;
-  const pageHeight = paperHeightMm * pointsPerMm;
-
-  const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([pageWidth, pageHeight]);
-
-  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-
-  const margin = 3 * pointsPerMm;
-  const pngBytes = dataUrlToBuffer(qrDataUrl);
-  const pngImage = await pdfDoc.embedPng(pngBytes);
-
-  // For print badge: BIGGER QR
-  const qrSize = Math.min(pageWidth * 0.5, pageHeight * 0.75);
-
-  // Center the QR horizontally and position it in upper half
-  const qrX = (pageWidth - qrSize) / 2;
-  const qrY = (pageHeight - qrSize) / 2 + 5 * pointsPerMm;
-
-  page.drawImage(pngImage, {
-    x: qrX,
-    y: qrY,
-    width: qrSize,
-    height: qrSize,
-  });
-
-  // Name at bottom (if provided) - centered
-  if (attendeeName) {
-    const formattedName = attendeeName
-      .split(" ")
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-      .join(" ");
-
-    const nameSize = 9;
-    const nameWidth = fontBold.widthOfTextAtSize(formattedName, nameSize);
-
-    page.drawText(formattedName, {
-      x: (pageWidth - nameWidth) / 2,
-      y: margin + 3,
-      size: nameSize,
-      font: fontBold,
-    });
-  }
-
-  const pdfBytes = await pdfDoc.save();
-  return Buffer.from(pdfBytes).toString("base64");
-}
-
 export async function uploadTicketQRCode(ticketId: string) {
   const qrDataUrl = await QRCode.toDataURL(ticketId);
   const base64Data = qrDataUrl.split(",")[1];
@@ -266,8 +201,11 @@ export async function buildAndSendTicketForAttendee(
   att: any,
   forceResend = false
 ) {
-  if (!att || !att.email)
+  // Skip if no email
+  if (!att || !att.email) {
+    console.log(`[ticketService] Skipping attendee ${att?.id} - no email`);
     return { ok: false, reason: "no-email", attendeeId: att?.id };
+  }
 
   function escapeHtml(str: string) {
     return String(str)
@@ -287,12 +225,9 @@ export async function buildAndSendTicketForAttendee(
       .join(" ");
   }
 
-  function getRecipientFirstName(att: any) {
-    const first =
-      att.first_name ??
-      (att.name ? String(att.name).trim().split(/\s+/)[0] : "");
-    return toTitleCase(first || "");
-  }
+  // Get full name in title case, fallback to "Hi"
+  const fullName = att.name ? toTitleCase(att.name.trim()) : "";
+  const greeting = fullName ? escapeHtml(fullName) : "";
 
   // 1) Find existing ticket
   const existing = await findTicketByAttendee(att.id);
@@ -311,8 +246,6 @@ export async function buildAndSendTicketForAttendee(
     width: 400,
     margin: 1,
   });
-  const qrBase64 = qrDataUrl.replace(/^data:image\/png;base64,/, "");
-  const qrBuffer = Buffer.from(qrBase64, "base64");
 
   // 3) Insert or update ticket record
   let insertedTicket = existing ?? null;
@@ -326,41 +259,7 @@ export async function buildAndSendTicketForAttendee(
       .eq("id", existing.id);
   }
 
-  // 4) Generate PRINT PDF (minimal badge for printing)
-  let printPdfBase64: string | null = null;
-  try {
-    printPdfBase64 = await generatePrintBadgePdfBase64({
-      ticketCode,
-      attendeeName: att.name ?? null,
-      qrDataUrl,
-    });
-    console.log("[ticketService] Print badge PDF generated successfully");
-  } catch (e) {
-    console.error("[ticketService] Print PDF generation failed", e);
-    printPdfBase64 = null;
-  }
-
-  // 5) Upload PRINT PDF & enqueue print job (this is what gets stored)
-  if (printPdfBase64) {
-    try {
-      const evId = att.event_id ?? process.env.EVENT_ID ?? "unknown-event";
-      const printJob = await uploadPdfAndEnqueuePrint(
-        evId,
-        ticketCode,
-        printPdfBase64,
-        insertedTicket?.id ?? null,
-        "auto-email"
-      );
-      console.log("[ticketService] Enqueued print job:", printJob?.id ?? null);
-    } catch (uplErr) {
-      console.warn(
-        "[ticketService] Upload/enqueue print failed (continuing):",
-        String(uplErr)
-      );
-    }
-  }
-
-  // 6) Generate EMAIL PDF (with name + role/company - NOT stored, just for attachment)
+  // 4) Generate EMAIL PDF attachment
   let emailPdfBase64: string | null = null;
   try {
     emailPdfBase64 = await generateTicketPdfBase64({
@@ -375,14 +274,16 @@ export async function buildAndSendTicketForAttendee(
     emailPdfBase64 = null;
   }
 
-  // 7) Upload QR to Supabase Storage and get public URL
+  // 5) Upload QR to Supabase Storage and get public URL
   const qrPublicUrl = await uploadTicketQRCode(ticketCode);
   console.log("[ticketService] QR public URL:", qrPublicUrl);
 
-  // 8) Prepare email HTML
+  // 6) Prepare email HTML
   const publicUrl = process.env.PUBLIC_URL ?? "";
   const bannerUrl = `${publicUrl}/banner.jpg`;
-  const recipientFirstName = escapeHtml(getRecipientFirstName(att));
+  const statusDisplay = att.status
+    ? escapeHtml(String(att.status))
+    : "Registered";
 
   const html = `
     <!doctype html>
@@ -406,8 +307,8 @@ export async function buildAndSendTicketForAttendee(
               <!-- Body -->
               <tr>
                 <td style="padding:28px 36px;color:#0b2a1a;">
-                  <p style="margin:0 0 16px;font-size:14px;color:#222;">Hello ${
-                    recipientFirstName || "there"
+                  <p style="margin:0 0 16px;font-size:14px;color:#222;">Hi${
+                    greeting ? " " + greeting : ""
                   },</p>
 
                   <p style="margin:0 0 18px;font-size:15px;color:#333;">
@@ -429,6 +330,7 @@ export async function buildAndSendTicketForAttendee(
                     <li><strong>Date:</strong> 5th - 6th November 2025</li>
                     <li><strong>Venue:</strong> Civic Centre, Lagos</li>
                     <li><strong>Time:</strong> 8am</li>
+                    <li><strong>Status:</strong> ${statusDisplay}</li>
                   </ul>
 
                   <p style="margin:12px 0 0;color:#333;font-size:14px;">
@@ -462,7 +364,7 @@ export async function buildAndSendTicketForAttendee(
     </html>
   `;
 
-  // 9) Create email job record
+  // 7) Create email job record
   const emailJob = await upsertEmailJob(
     insertedTicket?.id ?? null,
     att.email,
@@ -470,26 +372,25 @@ export async function buildAndSendTicketForAttendee(
     html
   );
 
-  // 10) Prepare attachments: EMAIL PDF only (not stored anywhere)
+  // 8) Prepare attachments: EMAIL PDF (base64 string for Resend)
+  // 8) Prepare attachments: EMAIL PDF (base64 string for Resend)
   const attachments: any[] = [];
   if (emailPdfBase64) {
     attachments.push({
-      filename: `${recipientFirstName}-${ticketCode}.pdf`,
-      type: "application/pdf",
-      base64: emailPdfBase64,
+      filename: `${fullName || ticketCode}-CheckInPass.pdf`,
+      content: Buffer.from(emailPdfBase64, "base64"),
     });
   }
-
-  // 11) Send email including PDF attachment
+  // 9) Send email including PDF attachment
   try {
     const sendResult = await sendTicketEmail(
       att.email,
       `Check-In Pass: 8th Annual Convention on Impact Investing`,
-      html,
-      attachments
+      html
+      // attachments
     );
 
-    console.log("[ticketService] sendResult:", sendResult);
+    console.log(`[ticketService] sendResult for ${att.email}:`, sendResult);
 
     if (sendResult.ok) {
       const sendResp = sendResult.resp;
@@ -546,4 +447,56 @@ export async function buildAndSendTicketForAttendee(
       error: errMsg,
     };
   }
+}
+
+/**
+ * Batch send tickets with concurrency control
+ * Optimized for sending 300+ tickets
+ */
+export async function batchSendTickets(
+  attendees: any[],
+  options: {
+    forceResend?: boolean;
+    concurrency?: number;
+    onProgress?: (current: number, total: number, result: any) => void;
+  } = {}
+) {
+  const { forceResend = false, concurrency = 10, onProgress } = options;
+  const results: any[] = [];
+  const total = attendees.length;
+
+  // Process in batches with concurrency control
+  for (let i = 0; i < attendees.length; i += concurrency) {
+    const batch = attendees.slice(i, i + concurrency);
+    const batchPromises = batch.map((att) =>
+      buildAndSendTicketForAttendee(att, forceResend).catch((err) => ({
+        ok: false,
+        reason: "exception",
+        attendeeId: att?.id,
+        error: String(err?.message ?? err),
+      }))
+    );
+
+    const batchResults = await Promise.all(batchPromises);
+    results.push(...batchResults);
+
+    // Report progress
+    if (onProgress) {
+      batchResults.forEach((result, idx) => {
+        onProgress(i + idx + 1, total, result);
+      });
+    }
+
+    // Small delay between batches to avoid overwhelming email service
+    if (i + concurrency < attendees.length) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  return {
+    total,
+    successful: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+    results,
+  };
 }
