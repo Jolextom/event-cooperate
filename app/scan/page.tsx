@@ -1008,7 +1008,7 @@ function ScanContent() {
                                     </button>
                                 </div>
                             </div>
-                            {selectedAttendee.title && (
+                            {selectedAttendee.title !== undefined && (
                                 <div>
                                     <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Title</label>
                                     <div className="mt-1 flex items-center justify-between gap-2 p-3 bg-slate-50 rounded-lg">
@@ -1026,7 +1026,7 @@ function ScanContent() {
                                     </div>
                                 </div>
                             )}
-                            {selectedAttendee.company && (
+                            {selectedAttendee.company !== undefined && (
                                 <div>
                                     <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Company</label>
                                     <div className="mt-1 flex items-center justify-between gap-2 p-3 bg-slate-50 rounded-lg">
