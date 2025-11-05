@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { Scan, X, Check, AlertCircle, Users, Copy, CheckCircle } from 'lucide-react';
@@ -18,7 +18,7 @@ interface Attendee {
     attendee_id?: string;
 }
 
-export default function ScanPage() {
+function ScanContent() {
     const searchParams = useSearchParams();
     const terminalId = searchParams.get('terminalId') || '904f9bad-9949-41ee-9221-067aed7630ee';
     const terminalName = searchParams.get('terminalName') || 'Gate Phone'; // Optional: allow passing name via URL, fallback to default
@@ -623,5 +623,13 @@ export default function ScanPage() {
                 </div>
             )}
         </div>
+    );
+}
+
+export default function ScanPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-600">Loading...</div>}>
+            <ScanContent />
+        </Suspense>
     );
 }
