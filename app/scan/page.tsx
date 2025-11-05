@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { Scan, X, Check, AlertCircle, Users, Copy, CheckCircle } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
@@ -18,6 +19,10 @@ interface Attendee {
 }
 
 export default function ScanPage() {
+    const searchParams = useSearchParams();
+    const terminalId = searchParams.get('terminalId') || '904f9bad-9949-41ee-9221-067aed7630ee';
+    const terminalName = searchParams.get('terminalName') || 'Gate Phone'; // Optional: allow passing name via URL, fallback to default
+
     const [activeTab, setActiveTab] = useState<'scan' | 'attendees'>('scan');
     const [status, setStatus] = useState<'ready' | 'scanning' | 'success' | 'error' | 'busy'>('ready');
     const [message, setMessage] = useState<string>('Ready to scan');
@@ -34,8 +39,6 @@ export default function ScanPage() {
     const processingRef = useRef<Set<string>>(new Set());
     const lastSeenRef = useRef<Map<string, number>>(new Map());
     const supabaseRef = useRef<any>(null);
-
-    const terminalId = '904f9bad-9949-41ee-9221-067aed7630ee';
 
     // Initialize Supabase client
     useEffect(() => {
@@ -61,7 +64,7 @@ export default function ScanPage() {
                 .channel('checkins')
                 .on(
                     'postgres_changes',
-                    { event: '*', schema: 'public', table: 'check_ins', filter: `terminal_id=eq.${terminalId}` },
+                    { event: '*', schema: 'public', table: 'checkin_log', filter: `terminal_id=eq.${terminalId}` },
                     (payload: any) => {
                         console.log('Realtime update:', payload);
                         fetchAttendees();
@@ -84,7 +87,7 @@ export default function ScanPage() {
                 setRealtimeConnected(false);
             }
         };
-    }, [activeTab]);
+    }, [activeTab, terminalId]); // Added terminalId dependency
 
     // Also refresh attendees list when a successful check-in happens
     useEffect(() => {
@@ -262,6 +265,14 @@ export default function ScanPage() {
         setManualCode('');
     };
 
+    if (!terminalId) {
+        return (
+            <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+                <div className="text-red-600 font-semibold">Error: terminalId is required in the URL query parameters.</div>
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen bg-slate-50">
             <div className="max-w-4xl mx-auto">
@@ -271,7 +282,7 @@ export default function ScanPage() {
                         <div className="flex items-center justify-between mb-4">
                             <h1 className="text-2xl font-bold text-slate-900">Quick Check-in</h1>
                             <div className="text-xs text-slate-500">
-                                Terminal: <span className="font-semibold text-slate-700">Gate Phone</span>
+                                Terminal: <span className="font-semibold text-slate-700">{terminalName}</span>
                             </div>
                         </div>
                         {/* Tabs */}
