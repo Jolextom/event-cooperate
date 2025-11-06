@@ -307,43 +307,39 @@ export async function buildAndSendTicketForAttendee(
               <!-- Body -->
               <tr>
                 <td style="padding:28px 36px;color:#0b2a1a;">
-                  <p style="margin:0 0 16px;font-size:14px;color:#222;">Hi${
+                  <p style="margin:0 0 16px;font-size:14px;color:#222;">Hello${
                     greeting ? " " + greeting : ""
                   },</p>
 
                   <p style="margin:0 0 18px;font-size:15px;color:#333;">
-                    We are pleased to confirm your participation in the <strong>8th Annual Convention on Impact Investing</strong>, hosted by the Impact Investors Foundation.
+                    What a start to the <strong>8th Annual Convening on Impact Investing</strong>! Day 1 was filled with incredible networking, deep dives into Impact conversations, and everything in between.
                   </p>
 
                   <p style="margin:0 0 18px;font-size:15px;color:#333;">
-                    To ensure a smooth and efficient check-in, we have provided your unique QR code below. You only need to present one version at the registration desk.
+                    We are excited to continue this momentum today with another powerful lineup of sessions.
+                  </p>
+
+                  <p style="margin:0 0 18px;font-size:15px;color:#333;">
+                    To ensure a quick entry this morning, we are re-sending your unique QR code. Please present it at the check-in desk upon arrival.
                   </p>
 
                   <p style="margin:18px 0;text-align:center;">
                     <img src="${qrPublicUrl}" alt="Ticket QR Code" style="max-width:300px;width:100%;height:auto;border-radius:8px;display:block;margin:0 auto;" />
                   </p>
 
-                  <h3 style="font-size:15px;margin:16px 0 8px;color:#0b2a1a;">Event Details:</h3>
+                  <h3 style="font-size:15px;margin:16px 0 8px;color:#0b2a1a;">Day 2 Reminders:</h3>
                   <ul style="margin:0 0 12px 18px;color:#333;font-size:14px;">
-                    <li><strong>Event:</strong> 8th Annual Convention on Impact Investing</li>
-                    <li><strong>Hosted By:</strong> Impact Investors Foundation</li>
-                    <li><strong>Date:</strong> 5th - 6th November 2025</li>
                     <li><strong>Venue:</strong> Civic Centre, Lagos</li>
-                    <li><strong>Time:</strong> 8am</li>
-                    <li><strong>Status:</strong> ${statusDisplay}</li>
+                    <li><strong>Start Time:</strong> 8am</li>
                   </ul>
 
                   <p style="margin:12px 0 0;color:#333;font-size:14px;">
                     If you have any questions or encounter issues viewing your QR code, please contact our team at <a href="mailto:events@swatleadershipacademy.com" style="color:#0b6b3a;text-decoration:none;">events@swatleadershipacademy.com</a>.
                   </p>
 
-                  <p style="margin:8px 0 6px;font-size:13px;color:#555;">
-                    For your convenience, your check-in pass (containing the same QR code) is also attached to this email as a PDF. You can save this file or print it.
-                  </p>
-
                   <div style="margin-top:22px;color:#444;font-size:13px;">
-                    <p style="margin:0;">We look forward to welcoming you.</p>
-                    <p style="margin-top:18px;">Best regards,<br/>SWAT Events<br/>Registrations Management for the Impact Investors Foundation</p>
+                    <p style="margin:0;">We look forward to another impactful day with you.</p>
+                    <p style="margin-top:18px;">Best regards,<br/> SWAT Events <br/>Registrations Management for the Impact Investors Foundation</p>
                   </div>
                 </td>
               </tr>
@@ -373,7 +369,6 @@ export async function buildAndSendTicketForAttendee(
   );
 
   // 8) Prepare attachments: EMAIL PDF (base64 string for Resend)
-  // 8) Prepare attachments: EMAIL PDF (base64 string for Resend)
   const attachments: any[] = [];
   if (emailPdfBase64) {
     attachments.push({
@@ -385,7 +380,7 @@ export async function buildAndSendTicketForAttendee(
   try {
     const sendResult = await sendTicketEmail(
       att.email,
-      `Check-In Pass: 8th Annual Convention on Impact Investing`,
+      `Day 2 Check-In: IIF 8th Annual Convening on Impact Investing`,
       html
       // attachments
     );
