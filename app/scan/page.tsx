@@ -64,6 +64,7 @@ function ScanContent() {
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
     const [searching, setSearching] = useState(false);
+    const [checkingInCode, setCheckingInCode] = useState<string | null>(null);
 
     // Walk-in registration state
     const [walkinName, setWalkinName] = useState('');
@@ -332,6 +333,7 @@ function ScanContent() {
 
     // Check in from search result
     const handleCheckInFromSearch = async (ticketCode: string) => {
+        setCheckingInCode(ticketCode);
         setStatus('busy');
         setMessage('Checking in...');
 
@@ -346,8 +348,20 @@ function ScanContent() {
             if (res.ok && data.ok) {
                 setStatus('success');
                 setMessage(`✓ Checked in: ${ticketCode}`);
-                // Refresh search results
-                setTimeout(() => handleSearch({ preventDefault: () => { } } as any), 500);
+
+                // Update search results to show checked-in status
+                setSearchResults(prev =>
+                    prev.map(result =>
+                        result.ticket_code === ticketCode
+                            ? { ...result, checked_in: true }
+                            : result
+                    )
+                );
+
+                // Also refresh attendees list if on that tab
+                if (activeTab === 'attendees') {
+                    setTimeout(() => fetchAttendees(false), 500);
+                }
             } else {
                 setStatus('error');
                 setMessage(data?.message ?? 'Check-in failed');
@@ -357,9 +371,10 @@ function ScanContent() {
             setStatus('error');
             setMessage('Network error');
         } finally {
+            setCheckingInCode(null);
             setTimeout(() => {
                 setStatus('ready');
-                setMessage('Ready');
+                setMessage('Ready to scan');
             }, 2000);
         }
     };
@@ -604,7 +619,7 @@ function ScanContent() {
                                             id="manual"
                                             value={manualCode}
                                             onChange={(e) => setManualCode(e.target.value)}
-                                            className="flex-1 rounded-lg border-2 border-slate-300 px-4 py-3 text-sm font-mono focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                                            className="flex-1 rounded-lg border-2 border-slate-300 px-4 py-3 text-sm font-mono focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-900 placeholder-slate-400"
                                             placeholder="Enter or paste ticket code..."
                                         />
                                         <button
@@ -718,6 +733,37 @@ function ScanContent() {
                         </div>
                     ) : (
                         <div className="space-y-4">
+                            {/* Status Message Card - Shows feedback for all manual tab actions */}
+                            <div className="bg-white rounded-lg shadow-sm border">
+                                <div
+                                    className={`p-4 rounded-lg flex items-center gap-3 ${status === 'success'
+                                        ? 'bg-green-50 border-green-300'
+                                        : status === 'error'
+                                            ? 'bg-red-50 border-red-300'
+                                            : status === 'busy'
+                                                ? 'bg-yellow-50 border-yellow-300'
+                                                : 'bg-slate-100 border-slate-300'
+                                        }`}
+                                >
+                                    {status === 'success' && <Check className="h-6 w-6 text-green-600 flex-shrink-0" />}
+                                    {status === 'error' && <AlertCircle className="h-6 w-6 text-red-600 flex-shrink-0" />}
+                                    {status === 'busy' && (
+                                        <div className="h-6 w-6 border-3 border-yellow-600 border-t-transparent rounded-full animate-spin flex-shrink-0"></div>
+                                    )}
+                                    {status === 'ready' && <Check className="h-6 w-6 text-slate-400 flex-shrink-0" />}
+                                    <span className={`text-base font-semibold ${status === 'success'
+                                        ? 'text-green-700'
+                                        : status === 'error'
+                                            ? 'text-red-700'
+                                            : status === 'busy'
+                                                ? 'text-yellow-700'
+                                                : 'text-slate-600'
+                                        }`}>
+                                        {message}
+                                    </span>
+                                </div>
+                            </div>
+
                             {/* Search Section */}
                             <div className="bg-white rounded-lg shadow-sm border">
                                 <div className="p-4 border-b">
@@ -730,7 +776,7 @@ function ScanContent() {
                                             type="text"
                                             value={searchQuery}
                                             onChange={(e) => setSearchQuery(e.target.value)}
-                                            className="flex-1 rounded-lg border-2 border-slate-300 px-4 py-3 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                                            className="flex-1 rounded-lg border-2 border-slate-300 px-4 py-3 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-900 placeholder-slate-400"
                                             placeholder="Search by name, email, or phone..."
                                         />
                                         <button
@@ -805,9 +851,17 @@ function ScanContent() {
                                                             ) : (
                                                                 <button
                                                                     onClick={() => handleCheckInFromSearch(result.ticket_code)}
-                                                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors"
+                                                                    disabled={checkingInCode === result.ticket_code}
+                                                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                                                                 >
-                                                                    Check In
+                                                                    {checkingInCode === result.ticket_code ? (
+                                                                        <>
+                                                                            <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                                                            Checking...
+                                                                        </>
+                                                                    ) : (
+                                                                        'Check In'
+                                                                    )}
                                                                 </button>
                                                             )}
                                                         </div>
@@ -849,7 +903,7 @@ function ScanContent() {
                                                 value={walkinName}
                                                 onChange={(e) => setWalkinName(e.target.value)}
                                                 required
-                                                className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                                                className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-900 placeholder-slate-400"
                                                 placeholder="Full name"
                                             />
                                         </div>
@@ -863,7 +917,7 @@ function ScanContent() {
                                                     type="text"
                                                     value={walkinTitle}
                                                     onChange={(e) => setWalkinTitle(e.target.value)}
-                                                    className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                                                    className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-900 placeholder-slate-400"
                                                     placeholder="e.g., Software Engineer"
                                                 />
                                             </div>
@@ -876,7 +930,7 @@ function ScanContent() {
                                                     type="text"
                                                     value={walkinCompany}
                                                     onChange={(e) => setWalkinCompany(e.target.value)}
-                                                    className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                                                    className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-900 placeholder-slate-400"
                                                     placeholder="e.g., Tech Corp"
                                                 />
                                             </div>
@@ -891,7 +945,7 @@ function ScanContent() {
                                                     type="email"
                                                     value={walkinEmail}
                                                     onChange={(e) => setWalkinEmail(e.target.value)}
-                                                    className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                                                    className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-900 placeholder-slate-400"
                                                     placeholder="email@example.com"
                                                 />
                                             </div>
@@ -904,7 +958,7 @@ function ScanContent() {
                                                     type="tel"
                                                     value={walkinPhone}
                                                     onChange={(e) => setWalkinPhone(e.target.value)}
-                                                    className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                                                    className="w-full rounded-lg border-2 border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-900 placeholder-slate-400"
                                                     placeholder="+1234567890"
                                                 />
                                             </div>
@@ -922,14 +976,14 @@ function ScanContent() {
                                                             type="text"
                                                             value={field.key}
                                                             onChange={(e) => updateMetaField(index, 'key', e.target.value)}
-                                                            className="flex-1 rounded-lg border-2 border-slate-300 px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                                                            className="flex-1 rounded-lg border-2 border-slate-300 px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-900 placeholder-slate-400"
                                                             placeholder="Field name (e.g., Dietary Preferences)"
                                                         />
                                                         <input
                                                             type="text"
                                                             value={field.value}
                                                             onChange={(e) => updateMetaField(index, 'value', e.target.value)}
-                                                            className="flex-1 rounded-lg border-2 border-slate-300 px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                                                            className="flex-1 rounded-lg border-2 border-slate-300 px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-900 placeholder-slate-400"
                                                             placeholder="Value (e.g., Vegetarian)"
                                                         />
                                                         {metaFields.length > 1 && (
